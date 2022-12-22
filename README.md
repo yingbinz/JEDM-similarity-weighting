@@ -14,7 +14,7 @@ Put the data under the data folder
 3.3 track1_compare_weighting_feature_selection.py does predictions with feature selection  
 3.4 track1_compare_with_DLKT.py builds models used for comparison with DLKT and IRT  
 3.5 track1_organize_data_for_DLKT.py processes data for DLKT. Scripts in dkt as well as sakt and saint build DLKT models  
-3.6 irt.Rmd builds the IRT models
+3.6 irt.Rmd builds the IRT models  
 3.7 track1_additional_weighting_comb_calculate_and_weight_features and track1_additional_weighting_comb_compare_weighting.py are for the additional weighting combination presented in the Appendix  
 
  
