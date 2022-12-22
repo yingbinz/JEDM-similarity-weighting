@@ -1,0 +1,237 @@
+
+
+```{r}
+library(openxlsx)
+library(tidyverse)
+theme_set(theme_bw())
+```
+# organize main results
+
+```{r}
+processing <- function(df, phase){
+  df$phase <- phase
+  df <- df %>% filter(features == 'All', !(grepl("pearson", x=weighting) | grepl("Euclidean", x=weighting))) %>%
+    select(-features, -contains("accuracy"), -contains("macro.F1"))
+  return(df)
+}
+
+main1 <- read.csv('result/track1_results.csv')
+main2 <- read.csv('result/track1_results_onlyS19train.csv')
+
+main1 <- processing(main1, "all")
+main2 <- processing(main2, "19")
+
+additional1 <- read.csv('result/additional_weighting_comb_track1_results.csv')
+additional2 <- read.csv('result/additional_weighting_comb_track1_results_onlyS19train.csv')
+
+additional1 <- processing(additional1, "all")
+additional2 <- processing(additional2, "19")
+
+data <- arrange(rbind(main1[-nrow(main1),], additional1, main1[nrow(main1),], main2[-nrow(main2),], additional2, main2[nrow(main2),]), model)
+
+
+data <- data %>% pivot_wider(id_cols = c('weighting', 'phase'), names_from = 'model', values_from = c('train.AUC', 'test.AUC'))
+
+data[, 3:8] <- round(data[, 3:8], 3)
+data <- arrange(data, phase)
+
+data
+
+data$weighting <- gsub('_all', '', data$weighting)
+data$weighting <- gsub('_Sp19', '', data$weighting)
+data$weighting <- gsub('code2vec_cosineSimilarity', 'code', data$weighting)
+data$weighting <- gsub('code2vec_cosine', 'code', data$weighting)
+data$weighting <- gsub('prompts_doc2vec_cosineSimilarity', 'prompt', data$weighting)
+data$weighting <- gsub('prompt_cosine', 'prompt', data$weighting)
+data$weighting <- gsub('no_weight', 'No weighting', data$weighting)
+data$weighting <- gsub('order_cosine_difficulty', 'all', data$weighting, fixed = TRUE)
+data$weighting <- gsub('_', ' + ', data$weighting, fixed = TRUE)
+
+data <- data %>% select(phase, weighting, contains("Logis"), contains("Random"), contains('XGB'))
+
+write.csv(data, file = 'result/organized results.csv', row.names = FALSE)
+```
+
+# plot for track 1 main result
+
+## processing
+
+```{r}
+processing <- function(df, phase){
+  df$phase <- phase
+  df <- df %>% filter(features == 'All', !(grepl("pearson", x=weighting) | grepl("Euclidean", x=weighting))) %>%
+    select(-features, -contains("accuracy"), -contains("macro.F1"))
+  return(df)
+}
+
+phase1 <- read.csv('result/track1_results.csv')
+phase2 <- read.csv('result/track1_results_onlyS19train.csv')
+
+phase1 <- processing(phase1, "all")
+phase2 <- processing(phase2, "19")
+
+df_plot <- arrange(rbind(phase1, phase2), model)
+
+df_plot <- arrange(df_plot, model)
+
+# replace text and set factor level
+df_plot$weighting <- gsub('_all', '', df_plot$weighting)
+df_plot$weighting <- gsub('_Sp19', '', df_plot$weighting)
+df_plot$weighting <- gsub('code2vec_cosineSimilarity', 'code', df_plot$weighting)
+df_plot$weighting <- gsub('prompts_doc2vec_cosineSimilarity', 'prompt', df_plot$weighting)
+df_plot$weighting <- gsub('no_weight', 'no weighting', df_plot$weighting)
+df_plot$weighting <- gsub('order_cosine_difficulty', 'all', df_plot$weighting, fixed = TRUE)
+df_plot$weighting <- gsub('_', ' + ', df_plot$weighting, fixed = TRUE)
+
+df_plot$model <- factor(df_plot$model, levels = c("LogisticRegression", "RandomForestClassifier", "XGBClassifier"),
+                        labels = c("Lasso", "Random forest", "XGB"))
+df_plot$weighting <- factor(df_plot$weighting, levels = rev(unique(df_plot$weighting)))
+
+df_plot$phase <- factor(df_plot$phase, levels = c("19", "all"), labels = c("Cross-semester", "Within-semester"))
+
+
+## create a column for data labels
+df_plot$label <- NA
+
+df_plot <- df_plot %>% mutate(
+  label = ifelse((weighting == "all" & model=="Lasso" & phase == "Cross-semester") |
+                   (weighting == "order + difficulty" & model=="Random forest" & phase == "Cross-semester") |
+                   (weighting == "order + difficulty" & model=="XGB"& phase == "Cross-semester")|
+                   (weighting == "difficulty" & model=="Lasso"& phase == "Within-semester")|
+                   (weighting == "order + difficulty" & model=="Random forest"& phase == "Within-semester")|
+                   (weighting == "difficulty" & model=="XGB"& phase == "Within-semester"),
+                 round(test.AUC, 3), NA)
+)
+  
+```
+
+## make plot
+
+```{r fig.height=10, fig.width=10}
+df_plot$weighting <- gsub("difficulty", "struggling", df_plot$weighting)
+df_plot$weighting <- factor(df_plot$weighting, levels = rev(unique(df_plot$weighting)))
+
+track1_fig <- df_plot %>% ggplot(aes(weighting, test.AUC, fill = weighting, label = label)) +
+  geom_bar(stat="identity", position = "dodge2") +
+  facet_grid(model~phase) +
+  scale_fill_brewer(palette ="Set1", direction=-1)+
+  coord_flip(ylim = c(0.76, 0.8)) +
+  geom_text(nudge_y = 0.003) +
+  labs(x=NULL, y="AUC")+
+  theme(panel.border = element_blank(),
+        axis.line = element_line(color="black"),
+        legend.position="none",
+         text = element_text(size = 20))
+
+track1_fig
+
+ggsave(track1_fig, filename = "result/track1_result.svg", height = 10, width = 11)
+```
+
+
+
+
+# plot for feature selection
+
+## combine data
+
+```{r}
+processing <- function(df, phase){
+  df$phase <- phase
+  df <- df %>% filter(features == 'All', !(grepl("pearson", x=weighting) | grepl("Euclidean", x=weighting))) %>%
+    select(-features, -contains("accuracy"), -contains("macro.F1"))
+  return(df)
+}
+
+main1 <- read.csv('result/track1_results.csv')
+main2 <- read.csv('result/track1_results_onlyS19train.csv')
+main1 <- processing(main1, "all")
+main2 <- processing(main2, "19")
+
+all <- arrange(rbind(main1, main2), model)
+
+all$num_features <- 65
+
+# feature selection data
+fs1 <- read.csv('result/feature_selection_track1_results.csv')
+fs2 <- read.csv('result/feature_selection_track1_results_onlyS19train.csv')
+
+fs1$phase <- "all"
+fs2$phase <- "19"
+fs1 <- fs1 %>% select( -contains("accuracy"), -contains("macro.F1"))
+fs2 <- fs2 %>% select( -contains("accuracy"), -contains("macro.F1"))
+
+
+# combine all data
+all <- rbind(fs1, fs2, all)
+```
+
+## processing
+
+```{r}
+df_plot <- all
+# replace text and set factor level
+df_plot$weighting <- gsub('_all', '', df_plot$weighting)
+df_plot$weighting <- gsub('_Sp19', '', df_plot$weighting)
+df_plot$weighting <- gsub('code2vec_cosineSimilarity', 'code', df_plot$weighting)
+df_plot$weighting <- gsub('prompts_doc2vec_cosineSimilarity', 'prompt', df_plot$weighting)
+df_plot$weighting <- gsub('no_weight', 'no weighting', df_plot$weighting)
+df_plot$weighting <- gsub('order_cosine_difficulty', 'all', df_plot$weighting, fixed = TRUE)
+df_plot$weighting <- gsub('_', ' + ', df_plot$weighting, fixed = TRUE)
+
+df_plot$model <- factor(df_plot$model, levels = c("LogisticRegression", "RandomForestClassifier", "XGBClassifier"),
+                        labels = c("Lasso", "Random forest", "XGB"))
+df_plot$weighting <- factor(df_plot$weighting, levels = unique(df_plot$weighting))
+
+df_plot$phase <- factor(df_plot$phase, levels = c("19", "all"), labels = c("Cross-semester", "Within-semester"))
+```
+
+## plot
+
+```{r fig.height=12, fig.width=10}
+df_plot$weighting <- gsub("difficulty", "struggling", df_plot$weighting)
+df_plot$weighting <- factor(df_plot$weighting, levels = unique(df_plot$weighting))
+feature_selection <- df_plot %>% ggplot(aes(num_features, test.AUC, color = weighting)) +
+  geom_point() +
+  geom_line() +
+  facet_grid(model~phase) +
+  scale_color_brewer(palette ="Set1")+
+  scale_x_continuous(breaks = c(5, seq(10,60,10),65), minor_breaks = NULL)+
+  labs(x="Number of features", y="AUC")+
+  coord_cartesian(ylim=c(0.758, 0.8)) +
+  theme(legend.key.width  = unit(1.5, 'cm'),
+        legend.position="top",
+         text = element_text(size = 20))+
+  guides(color = guide_legend(override.aes = list(size = 1.5), nrow=3, byrow=F))+
+  labs(color = "Weighting")
+
+feature_selection
+
+ggsave(feature_selection, filename = "result/feature_selection.svg", height = 12, width = 10)
+```
+
+# AUC boostrap
+
+```{r}
+library(pROC)
+
+phase1 <- read.csv("result/prediction_track1_results_onlyS19train.csv")
+phase1$Label <- ifelse(phase1$Label == "True", 1, 0)
+
+colnames(phase1) <- gsub("csv.class..","", colnames(phase1), fixed = T)
+colnames(phase1) <- gsub("sklearn.","", colnames(phase1), fixed = T)
+colnames(phase1) <- gsub("Classifier..","", colnames(phase1), fixed = T)
+colnames(phase1) <- gsub("xgboost.","", colnames(phase1), fixed = T)
+colnames(phase1) <- gsub("ensemble._forest.","", colnames(phase1), fixed = T)
+colnames(phase1) <- gsub("linear_model._logistic.","", colnames(phase1), fixed = T)
+colnames(phase1) <- gsub("Classifier..","", colnames(phase1), fixed = T)
+
+roc(phase1$Label, phase1$no_weight.XGB, auc=TRUE, ci = TRUE)
+roc(phase1$Label, phase1$difficulty.XGB, auc=TRUE, ci = TRUE)
+
+
+phase2 <- read.csv("result/prediction_track1_results.csv")
+
+
+```
+

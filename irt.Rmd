@@ -1,0 +1,179 @@
+```{r}
+library(mirt)
+library(tidyverse)
+library(psych)
+```
+
+# read data
+
+onlyS19 = FALSE: within semester prediction
+onlyS19 = TRUE: cross-semester prediction
+
+```{r}
+onlyS19 = FALSE
+
+fe <- read.csv('data/F19/Train/early.csv')
+fl <- read.csv('data/F19/Train/late.csv')
+
+if (onlyS19) {
+  se <- read.csv('data/S19/Train/early.csv')
+  sl <- read.csv('data/S19/Train/late.csv')
+  test <- read.csv('data/F19/Test/early.csv')
+  data <- rbind(se[,c("SubjectID", "ProblemID","Label")], sl[,c("SubjectID", "ProblemID","Label")],
+                test[,c("SubjectID", "ProblemID","Label")])  
+} else{
+  se <- read.csv('data/S19/All/early.csv')
+  sl <- read.csv('data/S19/All/late.csv')
+  test <- read.csv('data/F19/Test/early.csv')
+  data <- rbind(fe[,c("SubjectID", "ProblemID", "Label")], fl[,c("SubjectID", "ProblemID","Label")],
+                se[,c("SubjectID", "ProblemID","Label")], sl[,c("SubjectID", "ProblemID","Label")],
+                test[,c("SubjectID", "ProblemID","Label")])
+}
+
+
+
+early_data <- data
+
+data$Label <- ifelse(data$Label == 'True', 1, 0)
+data <- data %>% pivot_wider(id_cols = 'SubjectID', names_from = ProblemID, names_prefix = 'p', values_from = Label)
+
+late_problems <- paste("p",unique(fl$ProblemID),sep="")
+
+early_data <- data
+early_data[,late_problems] <- NA
+```
+
+# EFA
+
+```{r}
+used_data <- data[,-1]
+cor_tab <- cor(used_data, use = 'pairwise.complete.obs')
+KMO(cor_tab)
+cortest.bartlett(used_data)
+eigen(cor_tab)$values
+# pca(cor_tab, 1)
+fa.parallel(used_data, show.legend=T, fa = 'fa', fm = 'pa', ylabel = 'Eigenvalues of principal factors')
+
+pa <- fa(used_data, nfactors= 2,fm = "pa", rotate = "promax")
+print(loadings(pa),digits=2, cutoff=.2)
+
+```
+
+# IRT
+
+## Create model structure
+
+```{r}
+loadings <- pa$loadings 
+loadings <- data.frame(matrix(as.numeric(loadings), attributes(loadings)$dim, dimnames=attributes(loadings)$dimnames))
+loadings[loadings < 0.2] <- NA
+# loadings[which(rownames(loadings)=='p41'),] <- 2
+pa1.items <- which(!is.na(loadings$PA1))
+pa2.items <- which(!is.na(loadings$PA2))
+# pa3.items <- which(!is.na(loadings$PA3))
+# pa4.items <- which(!is.na(loadings$PA4))
+```
+
+## model estimation
+
+```{r}
+mirt.data <- used_data[,rownames(loadings)]
+model.mnrm<-mirt.model(paste0(paste("F1=", paste(pa1.items, collapse = ","), "\n", sep = ""),
+                              paste("F2=", paste(pa2.items, collapse = ","), "\n", sep = ""),
+                              # paste("F3=", paste(pa3.items, collapse = ","), "\n", sep = ""),
+                              # paste("F4=", paste(pa4.items, collapse = ","), "\n", sep = ""),
+                              "COV=F1*F2"))
+
+# Rach and 2PL mdoels
+rasch <- mirt(mirt.data, model.mnrm, c('Rasch'))
+twoPL <- mirt(mirt.data, model.mnrm, c('2PL')) 
+
+# 1 dim 2PL model
+onedim <- mirt(mirt.data, 1, c('2PL')) 
+onedimRasch <- mirt(mirt.data, 1, c('Rasch')) 
+
+# compare the model fit
+
+anova(rasch, twoPL)
+anova(onedim, twoPL)
+```
+
+# prediction
+
+## multidimensional 2PL
+
+```{r}
+early_data <- data
+early_data[,late_problems] <- NA
+early_data <- early_data[,c("SubjectID", rownames(loadings))]
+early_data <- early_data[-which(rowSums(is.na(early_data)) > 40),]
+ability <- fscores(twoPL, response.pattern = early_data[,-1], full.scores = TRUE, rotate = "oblimin", na.rm = FALSE, QMC=TRUE)[,1:2]
+ability_df <- data.frame(SubjectID = early_data$SubjectID, ability1 = ability[,'F1'], ability2 = ability[,'F2'])
+                         # ability3 = ability[,'F3'], ability4 = ability[,'F4'])
+```
+
+```{r}
+colname <- colnames(mirt.data[,-1])
+ilist <- which(colname %in% late_problems)
+prob_df <- data.frame(SubjectID = ability_df$SubjectID )
+for (i in ilist) {
+  item <- extract.item(twoPL, i)
+  
+  prob_df[,colname[i]] <- probtrace(item, ability)[,2]
+}
+prob_df <- pivot_longer(prob_df, cols = starts_with("p"), names_to = "ProblemID", values_to = "irtProbability")
+prob_df$ProblemID <- gsub("p", "", prob_df$ProblemID) %>% as.integer()
+```
+
+<!-- ```{r} -->
+<!-- write.csv(ability_df, file = "data/ours/irt_ability.csv", row.names = FALSE) -->
+<!-- write.csv(prob_df, file="data/ours/irt_prob.csv", row.names = FALSE) -->
+<!-- ``` -->
+
+### auc
+
+```{r}
+library(pROC)
+test_late <- read.csv('data/F19/Test/late.csv')
+
+test_late <- left_join(test_late, prob_df, by = c('SubjectID', 'ProblemID'))
+test_late$Label <- ifelse(test_late$Label == "True", 1, 0)
+auc(test_late$Label, test_late$irtProbability)
+```
+
+## one dim 2PL
+
+```{r}
+ability <- fscores(onedim, response.pattern = early_data[,-1], full.scores = TRUE, rotate = "oblimin", na.rm = FALSE)[,1]
+ability_df <- data.frame(SubjectID = early_data$SubjectID, ability1 = ability)
+```
+
+```{r}
+colname <- colnames(mirt.data[,-1])
+ilist <- which(colname %in% late_problems)
+prob_df <- data.frame(SubjectID = ability_df$SubjectID )
+for (i in ilist) {
+  item <- extract.item(onedim, i)
+  
+  prob_df[,colname[i]] <- probtrace(item, ability)[,2]
+}
+prob_df <- pivot_longer(prob_df, cols = starts_with("p"), names_to = "ProblemID", values_to = "irtProbability")
+prob_df$ProblemID <- gsub("p", "", prob_df$ProblemID) %>% as.integer()
+```
+
+<!-- ```{r} -->
+<!-- write.csv(ability_df, file = "data/ours/irt_ability.csv", row.names = FALSE) -->
+<!-- write.csv(prob_df, file="data/ours/irt_prob.csv", row.names = FALSE) -->
+<!-- ``` -->
+
+### auc
+
+```{r}
+library(pROC)
+test_late <- read.csv('data/F19/Test/late.csv')
+
+test_late <- left_join(test_late, prob_df, by = c('SubjectID', 'ProblemID'))
+test_late$Label <- ifelse(test_late$Label == "True", 1, 0)
+
+roc(test_late$Label, test_late$irtProbability, auc=TRUE, ci = TRUE)
+```
