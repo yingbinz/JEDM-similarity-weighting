@@ -1,7 +1,7 @@
 This reposi contains code used for the JEDM paper.
 To replicate the results:
 1. Following the instruction in this page to download the data https://sites.google.com/ncsu.edu/csedm-dc-2021/home?authuser=0  
-Put the data under the data folder  
+Put the data under a folder named "data"     
 
 2. Preprocess data  
 2.1 Run organize_data.py   
